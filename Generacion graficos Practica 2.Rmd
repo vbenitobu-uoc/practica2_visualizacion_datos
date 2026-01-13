@@ -1,0 +1,204 @@
+---
+title: "Analisis NBA Players"
+author: "Victor Benito Buendia"
+date: "2026-01-13"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width=8, fig.height=5)
+```
+
+```{r}
+suppressPackageStartupMessages(library(tidyverse))
+df <- read_csv("nba_globalizacion_2001_2026_FINAL.csv",
+               col_types = cols(season = col_integer(), international = col_logical(),
+                                mp = col_double(), pts = col_double(), trb = col_double(),
+                                ast = col_double(), .default = col_guess()))
+df <- df %>% mutate(international = as.logical(international),
+                    net_rtg = o_rtg - d_rtg,
+                    season = as.integer(season))
+```
+
+
+1. ¿Cómo ha evolucionado año tras año el número y el porcentaje de jugadores internacionales desde la temporada 2000-2001 hasta la actual 2025-2026?
+
+```{r}
+q1 <- df %>%
+  group_by(season) %>%
+  summarise(total_players = n_distinct(player_id),
+            intl_players = sum(international, na.rm = TRUE),
+            pct_intl = (intl_players / total_players) * 100) %>%
+  arrange(season)
+print(q1)
+```
+```{r}
+ggplot(q1, aes(x = season)) +
+  geom_line(aes(y = total_players, color = "Total Jugadores")) +
+  geom_point(aes(y = total_players, color = "Total Jugadores")) +
+  geom_line(aes(y = intl_players, color = "Jugadores Internacionales")) +
+  geom_point(aes(y = intl_players, color = "Jugadores Internacionales")) +
+  labs(title = "Evolución del Número de Jugadores", x = "Temporada", y = "Número de Jugadores") +
+  theme_minimal() +
+  scale_color_manual(values = c("Total Jugadores" = "blue", "Jugadores Internacionales" = "red"))
+```
+```{r}
+ggplot(q1, aes(x = season, y = pct_intl)) +
+  geom_line(color = "green") +
+  geom_point(color = "green") +
+  labs(title = "Evolución del Porcentaje de Jugadores Internacionales", x = "Temporada", y = "Porcentaje (%)") +
+  theme_minimal()
+```
+
+2. ¿En qué medida ha aumentado el porcentaje de minutos jugados por internacionales en la liga?
+
+```{r}
+q2 <- df %>%
+  group_by(season) %>%
+  summarise(total_mp = sum(mp, na.rm = TRUE),
+            intl_mp = sum(intl_minutes, na.rm = TRUE),
+            pct_intl_mp = (intl_mp / total_mp) * 100)
+```
+```{r}
+ggplot(q2, aes(x = season, y = pct_intl_mp)) +
+  geom_line(color = "purple") +
+  geom_point(color = "purple") +
+  labs(title = "Evolución del Porcentaje de Minutos Jugados por Internacionales",
+       x = "Temporada", y = "Porcentaje de Minutos (%)") +
+  theme_minimal()
+```
+
+3. ¿Existe correlación entre el porcentaje de minutos internacionales en un equipo y su éxito (victorias en temporada regular y campeonatos)?
+
+```{r}
+team_season <- df %>%
+  group_by(season, team) %>%
+  summarise(pct_intl_minutes = first(pct_intl_minutes_team),
+            made_playoffs = max(in_playoffs),
+            champion = max(champion),
+            .groups = "drop")
+```
+```{r}
+ggplot(team_season, aes(x = pct_intl_minutes, y = made_playoffs)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(title = "Correlación: % Minutos Intl vs. Clasificación a Playoffs",
+       x = "% Minutos Internacionales", y = "Clasificó a Playoffs (1=Sí)") +
+  theme_minimal()
+```
+```{r}
+ggplot(team_season, aes(x = factor(champion), y = pct_intl_minutes)) +
+  geom_boxplot(fill = c("red", "green")) +
+  labs(title = "Distribución de % Minutos Intl en Campeones vs. No Campeones",
+       x = "Campeón (0=No, 1=Sí)", y = "% Minutos Internacionales") +
+  theme_minimal()
+```
+
+
+4. ¿En qué temporada los jugadores internacionales superaron por primera vez a los estadounidenses en indicadores avanzados de eficiencia (PER, WS/48, VORP)?
+
+```{r}
+q4 <- df %>%
+  group_by(season, international) %>%
+  summarise(avg_net_rtg = mean(net_rtg, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = international, values_from = avg_net_rtg,
+              names_prefix = "net_", values_fill = NA) %>%
+  rename(net_US = net_FALSE, net_Intl = net_TRUE)
+print(q4)
+```
+```{r}
+ggplot(q4, aes(x = season)) +
+  geom_line(aes(y = net_US, color = "US"), linewidth = 1.1) +
+  geom_point(aes(y = net_US, color = "US")) +
+  geom_line(aes(y = net_Intl, color = "Internacionales"), linewidth = 1.1) +
+  geom_point(aes(y = net_Intl, color = "Internacionales")) +
+  labs(title = "Evolución del Net Rating promedio: EEUU vs. Internacionales",
+       subtitle = "Net Rating = Offensive Rating - Defensive Rating",
+       x = "Temporada", y = "Net Rating Promedio", color = "Origen") +
+  scale_color_manual(values = c("US" = "blue", "Internacionales" = "red")) +
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_text(face = "bold"), legend.position = "top")
+```
+
+
+5. ¿Qué países y continentes han experimentado el mayor crecimiento en número de jugadores y calidad media durante este período?
+
+```{r}
+intl_df <- df %>% filter(international, !is.na(continent), continent != "USA", continent != "")
+cont_count <- intl_df %>%
+  group_by(season, continent) %>%
+  summarise(num_players = n_distinct(player_id), .groups = "drop") %>%
+  complete(season = 2001:2026, continent = unique(continent), fill = list(num_players = 0))
+
+growth_players <- cont_count %>%
+  filter(season %in% c(2001, 2026)) %>%
+  pivot_wider(names_from = season, values_from = num_players, names_prefix = "players_", values_fill = 0) %>%
+  mutate(growth = players_2026 - players_2001) %>%
+  arrange(desc(growth))
+print(growth_players)
+
+cont_quality <- intl_df %>%
+  group_by(season, continent) %>%
+  summarise(avg_mp = mean(mp, na.rm = TRUE), .groups = "drop") %>%
+  complete(season = 2001:2026, continent = unique(continent), fill = list(avg_mp = 0))
+
+growth_quality <- cont_quality %>%
+  filter(season %in% c(2001, 2026)) %>%
+  pivot_wider(names_from = season, values_from = avg_mp, names_prefix = "mp_", values_fill = 0) %>%
+  mutate(growth_mp = mp_2026 - mp_2001) %>%
+  arrange(desc(growth_mp))
+print(growth_quality)
+
+country_growth <- intl_df %>%
+  group_by(season, birth_country) %>%
+  summarise(num_players = n_distinct(player_id), .groups = "drop") %>%
+  complete(season = 2001:2026, birth_country = unique(birth_country), fill = list(num_players = 0)) %>%
+  filter(season %in% c(2001, 2026)) %>%
+  pivot_wider(names_from = season, values_from = num_players, names_prefix = "players_", values_fill = 0) %>%
+  mutate(growth = players_2026 - players_2001) %>%
+  arrange(desc(growth)) %>%
+  filter(growth != 0)
+print(country_growth)
+```
+```{r}
+ggplot(growth_players, aes(x = reorder(continent, growth), y = growth, fill = continent)) +
+  geom_col() +
+  geom_text(aes(label = growth), hjust = -0.1, size = 3.8) +
+  coord_flip() +
+  labs(title = "Crecimiento neto de jugadores internacionales por continente",
+       subtitle = "Temporada 2001 vs 2026", x = NULL, y = "Jugadores más en 2026 que en 2001") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+```
+```{r}
+ggplot(growth_quality, aes(x = reorder(continent, growth_mp), y = growth_mp, fill = continent)) +
+  geom_col() +
+  geom_text(aes(label = round(growth_mp, 1)), hjust = -0.1, size = 3.8) +
+  coord_flip() +
+  labs(title = "Crecimiento en calidad media (minutos promedio por jugador)",
+       subtitle = "Temporada 2001 vs 2026", x = NULL, y = "Diferencia en minutos promedio (2026 - 2001)") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+```
+
+
+6. ¿Los equipos campeones de la última década han dependido más del talento internacional que los campeones de principios del siglo XXI?
+
+```{r}
+champ_teams <- df %>%
+  filter(champion) %>%
+  group_by(season) %>%
+  summarise(team = first(team), pct_intl = first(pct_intl_minutes_team), .groups = "drop")
+```
+```{r}
+ggplot(champ_teams, aes(x = season, y = pct_intl)) +
+  geom_line(color = "orange") +
+  geom_point(color = "orange") +
+  geom_vline(xintercept = c(2010, 2017), linetype = "dashed") +
+  labs(title = "Dependencia de Minutos Internacionales en Equipos Campeones",
+       x = "Temporada", y = "% Minutos Internacionales") +
+  theme_minimal()
+```
+
